@@ -4,7 +4,7 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
-import android.graphics.Path; // Necesario para dibujar el triángulo
+import android.graphics.Path;
 import android.graphics.RectF;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
@@ -15,7 +15,6 @@ import android.view.View;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Random;
 
 public class GameView extends View implements SensorEventListener {
 
@@ -24,14 +23,15 @@ public class GameView extends View implements SensorEventListener {
     }
     private GameState gameState = GameState.RUNNING;
 
-    private int currentLevel = 1; // Controla el nivel actual
-    private final int TOTAL_LEVELS = 3; // Número total de niveles
+    private int currentLevel = 1;
+    private final int TOTAL_LEVELS = 3;
 
     private final SensorManager sensorManager;
     private final Sensor accelerometer, proximity, lightSensor;
 
-    private float boardOffsetX = 0; // Desplazamiento X para centrar el laberinto
-    private float boardOffsetY = 0; // Desplazamiento Y para centrar el laberinto
+    // Offset para centralizar el tablero en la pantalla
+    private float boardOffsetX = 0;
+    private float boardOffsetY = 0;
 
     private final float START_X = 60;
     private final float START_Y = 60;
@@ -51,7 +51,7 @@ public class GameView extends View implements SensorEventListener {
 
     private float maxX, maxY;
 
-    // Dimensiones Fijas del Tablero del Laberinto
+    // Dimensiones Fijas del Tablero del Laberinto (como en tu código anterior)
     private final float BOARD_WIDTH = 1000;
     private final float BOARD_HEIGHT = 1700;
     private final float BORDER_WIDTH = 10;
@@ -60,7 +60,7 @@ public class GameView extends View implements SensorEventListener {
     private final float WALL_THICKNESS = 20;
 
 
-    // Colores de la Interfaz (Base para cambiar con el nivel)
+    // Colores de la Interfaz
     private final int DEFAULT_BACKGROUND_COLOR = Color.parseColor("#A0522D"); // Marrón madera
     private final int DEFAULT_WALL_COLOR = Color.DKGRAY; // Gris oscuro
     private final int DEFAULT_BALL_COLOR = Color.RED;
@@ -70,7 +70,7 @@ public class GameView extends View implements SensorEventListener {
     private int ballColor;
 
     private final Paint paintBall, paintText, paintWalls, paintExit;
-    private final Path trianglePath = new Path(); // Objeto para dibujar el triángulo
+    private final Path trianglePath = new Path();
 
     public GameView(Context context) {
         super(context);
@@ -84,7 +84,7 @@ public class GameView extends View implements SensorEventListener {
         paintBall.setColor(DEFAULT_BALL_COLOR);
         paintText = new Paint();
         paintText.setColor(Color.WHITE);
-        paintText.setTextSize(80); // Tamaño base
+        paintText.setTextSize(80);
         paintText.setTextAlign(Paint.Align.CENTER);
 
         paintWalls = new Paint();
@@ -99,7 +99,6 @@ public class GameView extends View implements SensorEventListener {
         resumeSensors();
     }
 
-    // Clase auxiliar para definir los datos de cada nivel
     private static class LevelData {
         public List<Wall> walls;
         public int wallColor;
@@ -120,7 +119,7 @@ public class GameView extends View implements SensorEventListener {
         int levelBallColor = DEFAULT_BALL_COLOR;
         RectF levelExitRect;
 
-        // Definición de la salida (la misma posición relativa para todos)
+        // Definición de la salida
         final float EXIT_LEFT = 450;
         final float EXIT_RIGHT = 650;
         final float EXIT_TOP = BOARD_HEIGHT;
@@ -128,19 +127,17 @@ public class GameView extends View implements SensorEventListener {
         levelExitRect = new RectF(EXIT_LEFT, EXIT_TOP, EXIT_RIGHT, EXIT_BOTTOM);
 
         // Muros de Borde (siempre los mismos con el hueco de salida)
-        levelWalls.add(new Wall(0, 0, BORDER_WIDTH, MAX_BOARD_Y)); // Izquierdo
-        levelWalls.add(new Wall(BOARD_WIDTH, 0, MAX_BOARD_X, MAX_BOARD_Y)); // Derecho
-        levelWalls.add(new Wall(0, 0, MAX_BOARD_X, BORDER_WIDTH)); // Superior
-
-        // Muros Inferiores (crean el hueco de la salida)
-        levelWalls.add(new Wall(0, EXIT_TOP, EXIT_LEFT, EXIT_BOTTOM)); // Inferior Izquierda al hueco
-        levelWalls.add(new Wall(EXIT_RIGHT, EXIT_TOP, MAX_BOARD_X, EXIT_BOTTOM)); // Inferior Derecha al hueco
+        levelWalls.add(new Wall(0, 0, BORDER_WIDTH, MAX_BOARD_Y));
+        levelWalls.add(new Wall(BOARD_WIDTH, 0, MAX_BOARD_X, MAX_BOARD_Y));
+        levelWalls.add(new Wall(0, 0, MAX_BOARD_X, BORDER_WIDTH));
+        levelWalls.add(new Wall(0, EXIT_TOP, EXIT_LEFT, EXIT_BOTTOM));
+        levelWalls.add(new Wall(EXIT_RIGHT, EXIT_TOP, MAX_BOARD_X, EXIT_BOTTOM));
 
         // --- Diseño Específico de Cada Nivel ---
         switch (level) {
-            case 1: // Nivel 1: Círculo (Rojo)
+            case 1:
                 levelBallColor = Color.RED;
-                levelWallColor = Color.parseColor("#4CAF50"); // Verde
+                levelWallColor = Color.parseColor("#4CAF50");
                 // Laberinto Único (el diseño original)
                 levelWalls.add(new Wall(10, 100, 300, 100 + WALL_THICKNESS));
                 levelWalls.add(new Wall(400, 100, 1000, 100 + WALL_THICKNESS));
@@ -160,14 +157,13 @@ public class GameView extends View implements SensorEventListener {
                 levelWalls.add(new Wall(10, 1300, 400, 1300 + WALL_THICKNESS));
                 levelWalls.add(new Wall(500, 1300, 900, 1300 + WALL_THICKNESS));
                 levelWalls.add(new Wall(900, 1300, 900 + WALL_THICKNESS, 1600));
-                // Muros de camino final, asegurando que el camino lleve a la salida
                 levelWalls.add(new Wall(10, 1600, 450, 1600 + WALL_THICKNESS));
                 levelWalls.add(new Wall(650, 1600, 1000, 1600 + WALL_THICKNESS));
                 break;
-            case 2: // Nivel 2: Cuadrado (Azul)
+            case 2:
                 levelBallColor = Color.BLUE;
-                levelWallColor = Color.parseColor("#FF9800"); // Naranja
-                // Laberinto Cuadrado - Diseño Abierto (Ejemplo)
+                levelWallColor = Color.parseColor("#FF9800");
+                // Diseño Abierto
                 levelWalls.add(new Wall(100, 100, 900, 100 + WALL_THICKNESS));
                 levelWalls.add(new Wall(100, 100, 100 + WALL_THICKNESS, 1500));
                 levelWalls.add(new Wall(900, 100, 900 + WALL_THICKNESS, 1500));
@@ -181,10 +177,10 @@ public class GameView extends View implements SensorEventListener {
                 levelWalls.add(new Wall(400, 1500, 400 + WALL_THICKNESS, 1600));
                 levelWalls.add(new Wall(600, 1500, 600 + WALL_THICKNESS, 1600));
                 break;
-            case 3: // Nivel 3: Triángulo (Amarillo)
+            case 3:
                 levelBallColor = Color.YELLOW;
-                levelWallColor = Color.parseColor("#9C27B0"); // Púrpura
-                // Laberinto Triángulo - Diseño Complejo (Ejemplo)
+                levelWallColor = Color.parseColor("#9C27B0");
+                // Diseño Complejo
                 levelWalls.add(new Wall(500, 100, 500 + WALL_THICKNESS, 1600));
                 levelWalls.add(new Wall(10, 800, 400, 800 + WALL_THICKNESS));
                 levelWalls.add(new Wall(600, 800, 990, 800 + WALL_THICKNESS));
@@ -193,7 +189,6 @@ public class GameView extends View implements SensorEventListener {
                 levelWalls.add(new Wall(900, 100, 900 + WALL_THICKNESS, 1600));
                 levelWalls.add(new Wall(100, 1600, 900, 1600 + WALL_THICKNESS));
 
-                // Bloques en el centro
                 levelWalls.add(new Wall(200, 200, 300, 300));
                 levelWalls.add(new Wall(700, 200, 800, 300));
                 levelWalls.add(new Wall(200, 1400, 300, 1500));
@@ -202,13 +197,11 @@ public class GameView extends View implements SensorEventListener {
                 levelWalls.add(new Wall(400, 1000, 600, 1200));
                 break;
             default:
-                // Si el nivel es mayor al total, vuelve al nivel 1.
                 return getLevelData(1);
         }
         return new LevelData(levelWalls, levelWallColor, levelBallColor, levelExitRect);
     }
 
-    // Configura los muros, colores y la salida para el nivel actual.
     private void setupWalls() {
         LevelData data = getLevelData(currentLevel);
         walls = data.walls;
@@ -216,19 +209,19 @@ public class GameView extends View implements SensorEventListener {
         wallColor = data.wallColor;
         ballColor = data.ballColor;
 
-        ballX = START_X; // Reinicia la posición de la bola
+        ballX = START_X;
         ballY = START_Y;
 
         paintWalls.setColor(wallColor);
         paintBall.setColor(ballColor);
-        backgroundColor = DEFAULT_BACKGROUND_COLOR; // Se restaura (o lo cambia el sensor de luz)
+        backgroundColor = DEFAULT_BACKGROUND_COLOR;
 
         gameState = GameState.RUNNING;
         invalidate();
     }
 
     private boolean checkWallCollision(float newX, float newY) {
-        // Aplica el offset de centralización a la posición de la bola para la colisión
+        // La colisión usa las coordenadas del laberinto (ballX, ballY) + el offset de la pantalla.
         RectF ballRect = new RectF(
                 newX - radius + boardOffsetX,
                 newY - radius + boardOffsetY,
@@ -244,7 +237,7 @@ public class GameView extends View implements SensorEventListener {
     }
 
     private boolean checkExitReached(float newX, float newY) {
-        // Aplica el offset de centralización a la posición de la bola para la colisión
+        // La salida usa las coordenadas del laberinto + el offset de la pantalla.
         RectF ballRect = new RectF(
                 newX - radius + boardOffsetX,
                 newY - radius + boardOffsetY,
@@ -254,12 +247,11 @@ public class GameView extends View implements SensorEventListener {
         return RectF.intersects(ballRect, exitRect);
     }
 
-    // Reinicia el juego, al nivel 1 si se pierde, o al siguiente si se gana.
     private void resetGame() {
         if (gameState == GameState.WON && currentLevel < TOTAL_LEVELS) {
             currentLevel++;
         } else {
-            currentLevel = 1; // Reinicia al nivel 1 si ganó el último o perdió
+            currentLevel = 1;
         }
 
         setupWalls();
@@ -268,7 +260,6 @@ public class GameView extends View implements SensorEventListener {
         invalidate();
     }
 
-    // Nuevo método para dibujar la bola según el nivel
     private void drawBall(Canvas canvas, float x, float y) {
         switch (currentLevel) {
             case 1: // Círculo
@@ -277,11 +268,13 @@ public class GameView extends View implements SensorEventListener {
             case 2: // Cuadrado
                 canvas.drawRect(x - radius, y - radius, x + radius, y + radius, paintBall);
                 break;
-            case 3: // Triángulo (equilátero, punta hacia arriba)
+            case 3: // Triángulo (equilátero)
                 trianglePath.reset();
-                trianglePath.moveTo(x, y - radius); // Punta superior
-                trianglePath.lineTo(x + (float)(radius * Math.sqrt(3)), y + radius / 2); // Esquina inferior derecha
-                trianglePath.lineTo(x - (float)(radius * Math.sqrt(3)), y + radius / 2); // Esquina inferior izquierda
+                float w = (float) (radius * Math.sqrt(3));
+
+                trianglePath.moveTo(x, y - radius);
+                trianglePath.lineTo(x + w * 0.5f, y + radius * 0.5f);
+                trianglePath.lineTo(x - w * 0.5f, y + radius * 0.5f);
                 trianglePath.close();
                 canvas.drawPath(trianglePath, paintBall);
                 break;
@@ -311,17 +304,15 @@ public class GameView extends View implements SensorEventListener {
         }
 
         if (gameState != GameState.WON || currentLevel < TOTAL_LEVELS) {
-            // Dibuja la salida, si no es el último nivel completado
             canvas.drawRoundRect(exitRect, 10, 10, paintExit);
         }
 
-        // Dibuja el nivel actual
-        paintText.setTextSize(50); // Tamaño más pequeño para el texto de nivel
+        paintText.setTextSize(50);
         paintText.setColor(Color.WHITE);
         canvas.drawText("Nivel: " + currentLevel, MAX_BOARD_X / 2, 50, paintText);
 
         if (gameState == GameState.RUNNING || gameState == GameState.PAUSED || gameState == GameState.LOST) {
-            // Dibuja la bola en sus coordenadas **sin** el offset, ya que el Canvas ya está trasladado
+            // Dibuja la bola en sus coordenadas internas
             drawBall(canvas, ballX, ballY);
         }
 
@@ -338,7 +329,7 @@ public class GameView extends View implements SensorEventListener {
             if (currentLevel == TOTAL_LEVELS) {
                 message = "¡FELICITACIONES, GANASTE EL JUEGO!";
                 paintText.setColor(Color.CYAN);
-                paintText.setTextSize(70); // Pequeño para que quepa bien
+                paintText.setTextSize(70);
             } else {
                 message = "¡NIVEL " + currentLevel + " COMPLETADO! Toca para el Nivel " + (currentLevel + 1);
                 paintText.setColor(Color.GREEN);
@@ -374,6 +365,8 @@ public class GameView extends View implements SensorEventListener {
 
     @Override
     public void onSensorChanged(SensorEvent event) {
+
+        // --- Sensor de Proximidad ---
         if (event.sensor.getType() == Sensor.TYPE_PROXIMITY) {
             if (event.values[0] < event.sensor.getMaximumRange()) {
                 if (gameState == GameState.RUNNING) {
@@ -386,24 +379,35 @@ public class GameView extends View implements SensorEventListener {
             }
         }
 
+        // --- Sensor de Luz ---
+        if (event.sensor.getType() == Sensor.TYPE_LIGHT) {
+            float lightValue = event.values[0];
+            backgroundColor = (lightValue < 10) ? Color.DKGRAY : DEFAULT_BACKGROUND_COLOR;
+        }
+
         if (gameState != GameState.RUNNING) {
             invalidate();
             return;
         }
 
+        // --- Lógica de Movimiento (Solo si RUNNING) ---
         if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
+
+            // COORDENADAS: Esta es la lógica que funciona en tu código original:
+            // X: Invertido (-event.values[0])
+            // Y: Normal (+event.values[1])
             float xMovement = -event.values[0] * movementSpeed;
             float yMovement = event.values[1] * movementSpeed;
 
             float nextX = ballX + xMovement;
             float nextY = ballY + yMovement;
 
-            // La verificación de colisión ahora debe usar la posición **sin** offset
             if (checkExitReached(nextX, nextY)) {
                 gameState = GameState.WON;
             }
-            // Verifica la colisión de la bola con la pared, incluyendo el offset del tablero
+            // Verifica la colisión con paredes usando la posición con offset
             else if (checkWallCollision(nextX, nextY)) {
+                // Lógica de deslizamiento: mueve solo en el eje no bloqueado
                 if (!checkWallCollision(nextX, ballY)) {
                     ballX = nextX;
                 }
@@ -411,25 +415,22 @@ public class GameView extends View implements SensorEventListener {
                     ballY = nextY;
                 }
             } else {
+                // No hay colisión, mueve libremente
                 ballX = nextX;
                 ballY = nextY;
             }
 
-            // Mantenemos la bola dentro de los límites del laberinto (sin el offset)
+            // Mantenemos la bola dentro de los límites del laberinto (MAX_BOARD_X/Y)
             if (ballX < radius) ballX = radius;
             if (ballY < radius) ballY = radius;
+
+            // CORRECCIÓN: Usamos MAX_BOARD_X/Y, no maxX/maxY
             if (ballX > MAX_BOARD_X - radius) ballX = MAX_BOARD_X - radius;
             if (ballY > MAX_BOARD_Y - radius) ballY = MAX_BOARD_Y - radius;
         }
 
-        if (event.sensor.getType() == Sensor.TYPE_LIGHT) {
-            float lightValue = event.values[0];
-            // Si hay poca luz, usa color oscuro; de lo contrario, usa el color de fondo predeterminado.
-            backgroundColor = (lightValue < 10) ? Color.DKGRAY : DEFAULT_BACKGROUND_COLOR;
-        }
-        if (gameState != GameState.RUNNING) {
-            invalidate();
-        }
+        // ¡Se debe llamar a invalidate() al final del onSensorChanged para actualizar la vista!
+        invalidate();
     }
 
     @Override

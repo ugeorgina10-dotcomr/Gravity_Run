@@ -19,24 +19,47 @@ import java.util.List;
 public class GameView extends View implements SensorEventListener {
 
     private enum GameState {
-        RUNNING, PAUSED, WON, LOST
+        LEVEL_SELECT,
+        RUNNING,
+        PAUSED,
+        WON,
+        LOST
     }
-    private GameState gameState = GameState.RUNNING;
+    private GameState gameState = GameState.LEVEL_SELECT;
 
-    private int currentLevel = 1;
-    private final int TOTAL_LEVELS = 3;
+    private enum PlayerShape {
+        CIRCLE, SQUARE, TRIANGLE
+    }
+    private PlayerShape playerShape = PlayerShape.CIRCLE;
+
+    private int currentLevel = 0; // 0 significa en el menú de selección
 
     private final SensorManager sensorManager;
     private final Sensor accelerometer, proximity, lightSensor;
 
-    // Offset para centralizar el tablero en la pantalla
-    private float boardOffsetX = 0;
-    private float boardOffsetY = 0;
+    // *** VARIABLES PARA EL CAMBIO CONSTANTE (NIVEL 3) ***
+    private long frameCount = 0; // Contador de frames para la forma cambiante
+    private final long SHAPE_CHANGE_INTERVAL = 30; // Cambia la forma cada 30 actualizaciones del sensor
+    // *************************************************
 
-    private final float START_X = 60;
-    private final float START_Y = 60;
-    private float ballX = START_X, ballY = START_Y;
-    private final float radius = 30;
+    // --- VARIABLES PARA ESCALADO Y CENTRADO ---
+    private final float DESIGN_WIDTH = 1010f;
+    private final float DESIGN_HEIGHT = 1710f;
+
+    private float scaleFactor = 1.0f;
+    private float offsetX = 0;
+    private float offsetY = 0;
+    // ------------------------------------------
+
+    // Coordenadas y tamaños originales que se escalarán
+    private final float ORIGINAL_START_X = 60;
+    private final float ORIGINAL_START_Y = 60;
+    private final float ORIGINAL_RADIUS = 30;
+    private final float ORIGINAL_SPEED = 2.5f;
+
+    private float ballX, ballY;
+    private float radius;
+    private float movementSpeed;
 
     private static class Wall {
         RectF rect;
@@ -44,33 +67,18 @@ public class GameView extends View implements SensorEventListener {
             this.rect = new RectF(left, top, right, bottom);
         }
     }
-    private List<Wall> walls;
+    private List<Wall> walls = new ArrayList<>();
 
     private RectF exitRect;
-    private final float movementSpeed = 2.5f;
+    private RectF[] levelButtons;
 
     private float maxX, maxY;
 
-    // Dimensiones Fijas del Tablero del Laberinto (como en tu código anterior)
-    private final float BOARD_WIDTH = 1000;
-    private final float BOARD_HEIGHT = 1700;
-    private final float BORDER_WIDTH = 10;
-    private final float MAX_BOARD_X = BOARD_WIDTH + BORDER_WIDTH;
-    private final float MAX_BOARD_Y = BOARD_HEIGHT + BORDER_WIDTH;
-    private final float WALL_THICKNESS = 20;
+    // Colores por defecto para evitar NullPointer
+    private int backgroundColor = Color.BLACK;
+    private final int DEFAULT_WALL_COLOR = Color.DKGRAY;
 
-
-    // Colores de la Interfaz
-    private final int DEFAULT_BACKGROUND_COLOR = Color.parseColor("#A0522D"); // Marrón madera
-    private final int DEFAULT_WALL_COLOR = Color.DKGRAY; // Gris oscuro
-    private final int DEFAULT_BALL_COLOR = Color.RED;
-
-    private int backgroundColor;
-    private int wallColor;
-    private int ballColor;
-
-    private final Paint paintBall, paintText, paintWalls, paintExit;
-    private final Path trianglePath = new Path();
+    private final Paint paintBall, paintText, paintWalls, paintExit, paintMenu;
 
     public GameView(Context context) {
         super(context);
@@ -80,155 +88,281 @@ public class GameView extends View implements SensorEventListener {
         proximity = sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY);
         lightSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT);
 
-        paintBall = new Paint();
-        paintBall.setColor(DEFAULT_BALL_COLOR);
-        paintText = new Paint();
+        paintBall = new Paint(Paint.ANTI_ALIAS_FLAG);
+        paintBall.setColor(Color.RED);
+
+        paintText = new Paint(Paint.ANTI_ALIAS_FLAG);
         paintText.setColor(Color.WHITE);
-        paintText.setTextSize(80);
         paintText.setTextAlign(Paint.Align.CENTER);
 
         paintWalls = new Paint();
         paintExit = new Paint();
+        paintMenu = new Paint(Paint.ANTI_ALIAS_FLAG);
 
         paintExit.setColor(Color.GREEN);
         paintExit.setStyle(Paint.Style.FILL);
         paintExit.setShadowLayer(10.0f, 0.0f, 0.0f, Color.WHITE);
 
-        setupWalls();
-
         resumeSensors();
     }
 
-    private static class LevelData {
-        public List<Wall> walls;
-        public int wallColor;
-        public int ballColor;
-        public RectF exitRect;
+    // --- Lógica de Escalado y Centrado ---
+    @Override
+    protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        super.onSizeChanged(w, h, oldw, oldh);
 
-        public LevelData(List<Wall> walls, int wallColor, int ballColor, RectF exitRect) {
-            this.walls = walls;
-            this.wallColor = wallColor;
-            this.ballColor = ballColor;
-            this.exitRect = exitRect;
+        maxX = w;
+        maxY = h;
+
+        float scaleX = w / DESIGN_WIDTH;
+        float scaleY = h / DESIGN_HEIGHT;
+        scaleFactor = Math.min(scaleX, scaleY);
+
+        float finalWidth = DESIGN_WIDTH * scaleFactor;
+        float finalHeight = DESIGN_HEIGHT * scaleFactor;
+        offsetX = (w - finalWidth) / 2;
+        offsetY = (h - finalHeight) / 2;
+
+        radius = ORIGINAL_RADIUS * scaleFactor;
+        movementSpeed = ORIGINAL_SPEED * scaleFactor;
+        paintText.setTextSize(60 * scaleFactor);
+
+        setupLevelSelectionMenu();
+
+        if (gameState == GameState.LEVEL_SELECT) {
+            loadLevel(0);
         }
     }
 
-    private LevelData getLevelData(int level) {
-        List<Wall> levelWalls = new ArrayList<>();
-        int levelWallColor = DEFAULT_WALL_COLOR;
-        int levelBallColor = DEFAULT_BALL_COLOR;
-        RectF levelExitRect;
+    private void setupLevelSelectionMenu() {
+        levelButtons = new RectF[3];
+        float buttonHeight = maxY / 6;
+        float buttonWidth = maxX * 0.7f;
+        float margin = maxY / 15;
+        float startY = maxY / 3;
 
-        // Definición de la salida
-        final float EXIT_LEFT = 450;
-        final float EXIT_RIGHT = 650;
-        final float EXIT_TOP = BOARD_HEIGHT;
-        final float EXIT_BOTTOM = MAX_BOARD_Y;
-        levelExitRect = new RectF(EXIT_LEFT, EXIT_TOP, EXIT_RIGHT, EXIT_BOTTOM);
+        for (int i = 0; i < 3; i++) {
+            float top = startY + (i * (buttonHeight + margin));
+            float bottom = top + buttonHeight;
+            float left = (maxX - buttonWidth) / 2;
+            float right = left + buttonWidth;
+            levelButtons[i] = new RectF(left, top, right, bottom);
+        }
+    }
 
-        // Muros de Borde (siempre los mismos con el hueco de salida)
-        levelWalls.add(new Wall(0, 0, BORDER_WIDTH, MAX_BOARD_Y));
-        levelWalls.add(new Wall(BOARD_WIDTH, 0, MAX_BOARD_X, MAX_BOARD_Y));
-        levelWalls.add(new Wall(0, 0, MAX_BOARD_X, BORDER_WIDTH));
-        levelWalls.add(new Wall(0, EXIT_TOP, EXIT_LEFT, EXIT_BOTTOM));
-        levelWalls.add(new Wall(EXIT_RIGHT, EXIT_TOP, MAX_BOARD_X, EXIT_BOTTOM));
+    // Ayudante para añadir paredes que aplica la escala y el offset de centrado
+    private void addScaledWall(float l, float t, float r, float b) {
+        walls.add(new Wall(
+                (l * scaleFactor) + offsetX,
+                (t * scaleFactor) + offsetY,
+                (r * scaleFactor) + offsetX,
+                (b * scaleFactor) + offsetY
+        ));
+    }
 
-        // --- Diseño Específico de Cada Nivel ---
+    private void loadLevel(int level) {
+        currentLevel = level;
+        walls.clear();
+        paintWalls.setColor(DEFAULT_WALL_COLOR);
+
+        // Reinicia el contador de frames al cargar un nivel
+        frameCount = 0;
+
+        // Posición inicial escalada y centrada
+        ballX = (ORIGINAL_START_X * scaleFactor) + offsetX;
+        ballY = (ORIGINAL_START_Y * scaleFactor) + offsetY;
+
+        // Definiciones originales
+        final float BORDER_WIDTH = 10;
+        final float MAX_X_DESIGN = 1000 + BORDER_WIDTH;
+        final float MAX_Y_DESIGN = 1700 + BORDER_WIDTH;
+        final float WALL_THICKNESS = 20;
+
+        // Variables de la meta (temporales, redefinidas en cada case)
+        float exitLeft = 450;
+        float exitRight = 650;
+        float exitTop = 1700;
+        float exitBottom = MAX_Y_DESIGN;
+
+        // --- Configuración por Nivel ---
         switch (level) {
-            case 1:
-                levelBallColor = Color.RED;
-                levelWallColor = Color.parseColor("#4CAF50");
-                // Laberinto Único (el diseño original)
-                levelWalls.add(new Wall(10, 100, 300, 100 + WALL_THICKNESS));
-                levelWalls.add(new Wall(400, 100, 1000, 100 + WALL_THICKNESS));
-                levelWalls.add(new Wall(100, 100, 100 + WALL_THICKNESS, 400));
-                levelWalls.add(new Wall(100, 400, 500, 400 + WALL_THICKNESS));
-                levelWalls.add(new Wall(600, 400, 1000, 400 + WALL_THICKNESS));
-                levelWalls.add(new Wall(300, 100, 300 + WALL_THICKNESS, 200));
-                levelWalls.add(new Wall(300, 300, 300 + WALL_THICKNESS, 400));
-                levelWalls.add(new Wall(300, 500, 300 + WALL_THICKNESS, 800));
-                levelWalls.add(new Wall(400, 600, 900, 600 + WALL_THICKNESS));
-                levelWalls.add(new Wall(600, 200, 600 + WALL_THICKNESS, 600));
-                levelWalls.add(new Wall(10, 800, 700, 800 + WALL_THICKNESS));
-                levelWalls.add(new Wall(800, 800, 1000, 800 + WALL_THICKNESS));
-                levelWalls.add(new Wall(100, 900, 100 + WALL_THICKNESS, 1400));
-                levelWalls.add(new Wall(200, 1000, 800, 1000 + WALL_THICKNESS));
-                levelWalls.add(new Wall(500, 900, 500 + WALL_THICKNESS, 1200));
-                levelWalls.add(new Wall(10, 1300, 400, 1300 + WALL_THICKNESS));
-                levelWalls.add(new Wall(500, 1300, 900, 1300 + WALL_THICKNESS));
-                levelWalls.add(new Wall(900, 1300, 900 + WALL_THICKNESS, 1600));
-                levelWalls.add(new Wall(10, 1600, 450, 1600 + WALL_THICKNESS));
-                levelWalls.add(new Wall(650, 1600, 1000, 1600 + WALL_THICKNESS));
-                break;
-            case 2:
-                levelBallColor = Color.BLUE;
-                levelWallColor = Color.parseColor("#FF9800");
-                // Diseño Abierto
-                levelWalls.add(new Wall(100, 100, 900, 100 + WALL_THICKNESS));
-                levelWalls.add(new Wall(100, 100, 100 + WALL_THICKNESS, 1500));
-                levelWalls.add(new Wall(900, 100, 900 + WALL_THICKNESS, 1500));
-                levelWalls.add(new Wall(200, 300, 800, 300 + WALL_THICKNESS));
-                levelWalls.add(new Wall(200, 500, 800, 500 + WALL_THICKNESS));
-                levelWalls.add(new Wall(200, 700, 800, 700 + WALL_THICKNESS));
-                levelWalls.add(new Wall(200, 900, 800, 900 + WALL_THICKNESS));
-                levelWalls.add(new Wall(200, 1100, 800, 1100 + WALL_THICKNESS));
-                levelWalls.add(new Wall(200, 1300, 800, 1300 + WALL_THICKNESS));
-                levelWalls.add(new Wall(100, 1500, 900, 1500 + WALL_THICKNESS));
-                levelWalls.add(new Wall(400, 1500, 400 + WALL_THICKNESS, 1600));
-                levelWalls.add(new Wall(600, 1500, 600 + WALL_THICKNESS, 1600));
-                break;
-            case 3:
-                levelBallColor = Color.YELLOW;
-                levelWallColor = Color.parseColor("#9C27B0");
-                // Diseño Complejo
-                levelWalls.add(new Wall(500, 100, 500 + WALL_THICKNESS, 1600));
-                levelWalls.add(new Wall(10, 800, 400, 800 + WALL_THICKNESS));
-                levelWalls.add(new Wall(600, 800, 990, 800 + WALL_THICKNESS));
-                levelWalls.add(new Wall(100, 100, 900, 100 + WALL_THICKNESS));
-                levelWalls.add(new Wall(100, 100, 100 + WALL_THICKNESS, 1600));
-                levelWalls.add(new Wall(900, 100, 900 + WALL_THICKNESS, 1600));
-                levelWalls.add(new Wall(100, 1600, 900, 1600 + WALL_THICKNESS));
+            case 1: // Nivel 1: Círculo Rojo (Original)
+                backgroundColor = Color.parseColor("#A0522D"); // Marrón
+                paintBall.setColor(Color.RED);
+                playerShape = PlayerShape.CIRCLE;
+                paintExit.setColor(Color.GREEN);
 
-                levelWalls.add(new Wall(200, 200, 300, 300));
-                levelWalls.add(new Wall(700, 200, 800, 300));
-                levelWalls.add(new Wall(200, 1400, 300, 1500));
-                levelWalls.add(new Wall(700, 1400, 800, 1500));
-                levelWalls.add(new Wall(400, 400, 600, 600));
-                levelWalls.add(new Wall(400, 1000, 600, 1200));
+                // Laberinto Original
+                addScaledWall(10, 100, 300, 100 + WALL_THICKNESS);
+                addScaledWall(400, 100, 1000, 100 + WALL_THICKNESS);
+                addScaledWall(100, 100, 100 + WALL_THICKNESS, 400);
+                addScaledWall(100, 400, 500, 400 + WALL_THICKNESS);
+                addScaledWall(600, 400, 1000, 400 + WALL_THICKNESS);
+                addScaledWall(300, 500, 300 + WALL_THICKNESS, 800);
+                addScaledWall(400, 600, 900, 600 + WALL_THICKNESS);
+                addScaledWall(600, 200, 600 + WALL_THICKNESS, 600);
+                addScaledWall(10, 800, 700, 800 + WALL_THICKNESS);
+                addScaledWall(100, 900, 100 + WALL_THICKNESS, 1400);
+                addScaledWall(200, 1000, 800, 1000 + WALL_THICKNESS);
+                addScaledWall(500, 900, 500 + WALL_THICKNESS, 1200);
+                addScaledWall(10, 1300, 400, 1300 + WALL_THICKNESS);
+                addScaledWall(900, 1300, 900 + WALL_THICKNESS, 1600);
                 break;
-            default:
-                return getLevelData(1);
+
+            case 2: // Nivel 2: Cuadrado Azul - Laberinto Espiral (Bordes inferiores cerrados)
+                backgroundColor = Color.parseColor("#4682B4");
+                paintBall.setColor(Color.BLUE);
+                playerShape = PlayerShape.SQUARE;
+                paintExit.setColor(Color.YELLOW);
+
+                // Reubicar la meta al centro del laberinto (cerca de 500, 850)
+                exitLeft = 400;
+                exitRight = 600;
+                exitTop = 800;
+                exitBottom = 900;
+
+                // Laberinto con más anillos de espiral concéntrica.
+                // Anillo exterior (Grande, casi el borde)
+                addScaledWall(100, 100, 900, 100 + WALL_THICKNESS);
+                addScaledWall(900 - WALL_THICKNESS, 100 + WALL_THICKNESS, 900, 1500);
+                addScaledWall(100, 1500 - WALL_THICKNESS, 900 - WALL_THICKNESS, 1500);
+                addScaledWall(100, 200, 100 + WALL_THICKNESS, 1500 - WALL_THICKNESS);
+
+                // Segundo anillo
+                addScaledWall(200, 200, 800, 200 + WALL_THICKNESS);
+                addScaledWall(800 - WALL_THICKNESS, 200 + WALL_THICKNESS, 800, 1400);
+                addScaledWall(200, 1400 - WALL_THICKNESS, 800 - WALL_THICKNESS, 1400);
+                addScaledWall(200, 300, 200 + WALL_THICKNESS, 1400 - WALL_THICKNESS);
+
+                // Tercer anillo
+                addScaledWall(300, 300, 700, 300 + WALL_THICKNESS);
+                addScaledWall(700 - WALL_THICKNESS, 300 + WALL_THICKNESS, 700, 1300);
+                addScaledWall(300, 1300 - WALL_THICKNESS, 700 - WALL_THICKNESS, 1300);
+                addScaledWall(300, 400, 300 + WALL_THICKNESS, 1300 - WALL_THICKNESS);
+
+                // Cuarto anillo (El que contiene el centro)
+                addScaledWall(400, 400, 600, 400 + WALL_THICKNESS);
+                addScaledWall(600 - WALL_THICKNESS, 400 + WALL_THICKNESS, 600, 1200);
+                addScaledWall(400, 1200 - WALL_THICKNESS, 600 - WALL_THICKNESS, 1200);
+                addScaledWall(400, 500, 400 + WALL_THICKNESS, 1200 - WALL_THICKNESS);
+
+                // Muro extra para cerrarlo un poco más y que la salida esté clara.
+                addScaledWall(500 - WALL_THICKNESS/2, 500, 500 + WALL_THICKNESS/2, 800);
+                addScaledWall(500 - WALL_THICKNESS/2, 900, 500 + WALL_THICKNESS/2, 1100);
+                break;
+
+            case 3: // Nivel 3: Círculo/Cuadrado Cambiante
+                backgroundColor = Color.parseColor("#4B0082"); // Índigo Oscuro
+                paintBall.setColor(Color.MAGENTA);
+                playerShape = PlayerShape.CIRCLE;
+                paintExit.setColor(Color.RED);
+
+                // La salida en el borde inferior.
+                exitLeft = 450;
+                exitRight = 650;
+                exitTop = 1700;
+                exitBottom = MAX_Y_DESIGN;
+
+                // Laberinto similar al Nivel 1
+                final float THIN_WALL = WALL_THICKNESS;
+
+                // Fila 1 (por debajo del inicio)
+                addScaledWall(10, 200, 300, 200 + THIN_WALL);
+                addScaledWall(500, 200, 1000, 200 + THIN_WALL);
+
+                // Pared vertical 1
+                addScaledWall(400, 200 + THIN_WALL, 400 + THIN_WALL, 600);
+
+                // Fila 2
+                addScaledWall(100, 400, 400, 400 + THIN_WALL);
+                addScaledWall(500, 400, 900, 400 + THIN_WALL);
+
+                // Pared vertical 2
+                addScaledWall(600, 400 + THIN_WALL, 600 + THIN_WALL, 800);
+
+                // Fila 3
+                addScaledWall(10, 600, 500, 600 + THIN_WALL);
+                addScaledWall(700, 600, 1000, 600 + THIN_WALL);
+
+                // Pared vertical 3
+                addScaledWall(200, 600 + THIN_WALL, 200 + THIN_WALL, 1000);
+
+                // Fila 4
+                addScaledWall(300, 800, 700, 800 + THIN_WALL);
+                addScaledWall(800, 800, 1000, 800 + THIN_WALL);
+
+                // Pared vertical 4
+                addScaledWall(800, 800 + THIN_WALL, 800 + THIN_WALL, 1200);
+
+                // Fila 5
+                addScaledWall(10, 1000, 200, 1000 + THIN_WALL);
+                addScaledWall(300, 1000, 700, 1000 + THIN_WALL);
+                addScaledWall(900, 1000, 1000, 1000 + THIN_WALL);
+
+                // Pared vertical 5
+                addScaledWall(500, 1000 + THIN_WALL, 500 + THIN_WALL, 1400);
+
+                // Fila 6 (Cerca del fondo)
+                addScaledWall(10, 1400, 400, 1400 + THIN_WALL);
+                addScaledWall(600, 1400, 1000, 1400 + THIN_WALL);
+
+                // Muros para forzar la salida (450-650)
+                addScaledWall(700, 1500, 700 + THIN_WALL, 1700);
+                addScaledWall(300, 1500, 300 + THIN_WALL, 1700);
+
+                // Muro en la parte inferior para forzar la salida
+                addScaledWall(700 + THIN_WALL, 1600, 1000, 1600 + THIN_WALL);
+                addScaledWall(10, 1600, 300, 1600 + THIN_WALL);
+                break;
+
+            case 0: // Menú de Selección
+                backgroundColor = Color.BLACK;
+                paintBall.setColor(Color.GRAY);
+                playerShape = PlayerShape.CIRCLE;
+                walls.clear();
+                exitRect = null;
+                return;
         }
-        return new LevelData(levelWalls, levelWallColor, levelBallColor, levelExitRect);
-    }
 
-    private void setupWalls() {
-        LevelData data = getLevelData(currentLevel);
-        walls = data.walls;
-        exitRect = data.exitRect;
-        wallColor = data.wallColor;
-        ballColor = data.ballColor;
+        // Crear Rectángulo de salida escalado
+        exitRect = new RectF(
+                (exitLeft * scaleFactor) + offsetX,
+                (exitTop * scaleFactor) + offsetY,
+                (exitRight * scaleFactor) + offsetX,
+                (exitBottom * scaleFactor) + offsetY
+        );
 
-        ballX = START_X;
-        ballY = START_Y;
+        // --- MUROS FIJOS (BORDES) ---
+        addScaledWall(0, 0, BORDER_WIDTH, MAX_Y_DESIGN); // Izquierdo
+        addScaledWall(1000, 0, MAX_X_DESIGN, MAX_Y_DESIGN); // Derecho
+        addScaledWall(0, 0, MAX_X_DESIGN, BORDER_WIDTH); // Superior
 
-        paintWalls.setColor(wallColor);
-        paintBall.setColor(ballColor);
-        backgroundColor = DEFAULT_BACKGROUND_COLOR;
+        // Lógica del borde inferior (posición fija 1700/MAX_Y_DESIGN):
+        final float BOTTOM_EDGE_Y_START = 1700;
+        final float BOTTOM_EDGE_Y_END = MAX_Y_DESIGN;
+
+        if (level == 1 || level == 2) {
+            // Cierra el borde inferior por completo para los niveles con meta inferior o meta central.
+            addScaledWall(0, BOTTOM_EDGE_Y_START, MAX_X_DESIGN, BOTTOM_EDGE_Y_END);
+        } else if (level == 3) {
+            // Nivel 3: Deja el hueco de salida en el centro inferior
+            addScaledWall(0, BOTTOM_EDGE_Y_START, exitLeft, BOTTOM_EDGE_Y_END);
+            addScaledWall(exitRight, BOTTOM_EDGE_Y_START, MAX_X_DESIGN, BOTTOM_EDGE_Y_END);
+        }
 
         gameState = GameState.RUNNING;
+        resumeSensors();
         invalidate();
     }
 
     private boolean checkWallCollision(float newX, float newY) {
-        // La colisión usa las coordenadas del laberinto (ballX, ballY) + el offset de la pantalla.
-        RectF ballRect = new RectF(
-                newX - radius + boardOffsetX,
-                newY - radius + boardOffsetY,
-                newX + radius + boardOffsetX,
-                newY + radius + boardOffsetY
-        );
         for (Wall wall : walls) {
+            RectF ballRect = new RectF(
+                    newX - radius,
+                    newY - radius,
+                    newX + radius,
+                    newY + radius
+            );
             if (RectF.intersects(ballRect, wall.rect)) {
                 return true;
             }
@@ -237,47 +371,63 @@ public class GameView extends View implements SensorEventListener {
     }
 
     private boolean checkExitReached(float newX, float newY) {
-        // La salida usa las coordenadas del laberinto + el offset de la pantalla.
+        if (exitRect == null) return false;
         RectF ballRect = new RectF(
-                newX - radius + boardOffsetX,
-                newY - radius + boardOffsetY,
-                newX + radius + boardOffsetX,
-                newY + radius + boardOffsetY
+                newX - radius,
+                newY - radius,
+                newX + radius,
+                newY + radius
         );
         return RectF.intersects(ballRect, exitRect);
     }
 
     private void resetGame() {
-        if (gameState == GameState.WON && currentLevel < TOTAL_LEVELS) {
-            currentLevel++;
-        } else {
-            currentLevel = 1;
-        }
-
-        setupWalls();
-        gameState = GameState.RUNNING;
-        resumeSensors();
+        gameState = GameState.LEVEL_SELECT;
+        loadLevel(0);
         invalidate();
     }
 
-    private void drawBall(Canvas canvas, float x, float y) {
-        switch (currentLevel) {
-            case 1: // Círculo
-                canvas.drawCircle(x, y, radius, paintBall);
+    private void drawPlayer(Canvas canvas) {
+        switch (playerShape) {
+            case SQUARE:
+                float size = radius * 1.5f;
+                canvas.drawRect(ballX - size / 2, ballY - size / 2, ballX + size / 2, ballY + size / 2, paintBall);
                 break;
-            case 2: // Cuadrado
-                canvas.drawRect(x - radius, y - radius, x + radius, y + radius, paintBall);
-                break;
-            case 3: // Triángulo (equilátero)
-                trianglePath.reset();
-                float w = (float) (radius * Math.sqrt(3));
-
-                trianglePath.moveTo(x, y - radius);
-                trianglePath.lineTo(x + w * 0.5f, y + radius * 0.5f);
-                trianglePath.lineTo(x - w * 0.5f, y + radius * 0.5f);
+            case TRIANGLE:
+                // Dibuja un triángulo equilátero
+                Path trianglePath = new Path();
+                trianglePath.moveTo(ballX, ballY - radius);
+                trianglePath.lineTo(ballX - (float) (radius * Math.sqrt(3) / 2), ballY + radius / 2);
+                trianglePath.lineTo(ballX + (float) (radius * Math.sqrt(3) / 2), ballY + radius / 2);
                 trianglePath.close();
                 canvas.drawPath(trianglePath, paintBall);
                 break;
+            case CIRCLE:
+            default:
+                canvas.drawCircle(ballX, ballY, radius, paintBall);
+                break;
+        }
+    }
+
+    private void drawLevelSelectMenu(Canvas canvas) {
+        paintText.setColor(Color.WHITE);
+        canvas.drawText("GRAVITY RUN", maxX / 2, maxY / 7, paintText);
+        paintText.setTextSize(40 * scaleFactor);
+        canvas.drawText("Elige tu Nivel", maxX / 2, maxY / 4, paintText);
+
+        paintText.setTextSize(50 * scaleFactor);
+        for (int i = 0; i < levelButtons.length; i++) {
+            paintMenu.setColor(Color.parseColor("#282828"));
+            paintMenu.setStyle(Paint.Style.FILL);
+            canvas.drawRoundRect(levelButtons[i], 20, 20, paintMenu);
+
+            paintMenu.setColor(Color.parseColor("#444444"));
+            paintMenu.setStyle(Paint.Style.STROKE);
+            paintMenu.setStrokeWidth(5);
+            canvas.drawRoundRect(levelButtons[i], 20, 20, paintMenu);
+
+            paintText.setColor(Color.WHITE);
+            canvas.drawText("NIVEL " + (i + 1), levelButtons[i].centerX(), levelButtons[i].centerY() + (paintText.getTextSize() / 3), paintText);
         }
     }
 
@@ -286,60 +436,40 @@ public class GameView extends View implements SensorEventListener {
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
 
-        maxX = getWidth();
-        maxY = getHeight();
-
-        // 1. Calcular Desplazamiento para Centralizar el Tablero
-        boardOffsetX = (maxX - MAX_BOARD_X) / 2;
-        boardOffsetY = (maxY - MAX_BOARD_Y) / 2;
-
         canvas.drawColor(backgroundColor);
 
-        // 2. Aplicar Desplazamiento a Todo el Dibujo del Laberinto
-        canvas.save();
-        canvas.translate(boardOffsetX, boardOffsetY);
+        if (gameState == GameState.LEVEL_SELECT) {
+            drawLevelSelectMenu(canvas);
+            return;
+        }
+
+        if (walls.isEmpty() || exitRect == null) {
+            return;
+        }
 
         for (Wall wall : walls) {
             canvas.drawRect(wall.rect, paintWalls);
         }
 
-        if (gameState != GameState.WON || currentLevel < TOTAL_LEVELS) {
-            canvas.drawRoundRect(exitRect, 10, 10, paintExit);
+        if (exitRect != null) {
+            canvas.drawRoundRect(exitRect, 10 * scaleFactor, 10 * scaleFactor, paintExit);
         }
-
-        paintText.setTextSize(50);
-        paintText.setColor(Color.WHITE);
-        canvas.drawText("Nivel: " + currentLevel, MAX_BOARD_X / 2, 50, paintText);
 
         if (gameState == GameState.RUNNING || gameState == GameState.PAUSED || gameState == GameState.LOST) {
-            // Dibuja la bola en sus coordenadas internas
-            drawBall(canvas, ballX, ballY);
+            drawPlayer(canvas);
         }
 
-        canvas.restore(); // Restaura el Canvas a la posición original (sin offset)
-
-
-        // 3. Dibujar Mensajes Centrados en la Pantalla Completa
         String message = null;
         if (gameState == GameState.PAUSED) {
-            message = "PAUSADO (Cubre Proximidad para Reanudar)";
+            message = "PAUSADO";
             paintText.setColor(Color.YELLOW);
-            paintText.setTextSize(60);
         } else if (gameState == GameState.WON) {
-            if (currentLevel == TOTAL_LEVELS) {
-                message = "¡FELICITACIONES, GANASTE EL JUEGO!";
-                paintText.setColor(Color.CYAN);
-                paintText.setTextSize(70);
-            } else {
-                message = "¡NIVEL " + currentLevel + " COMPLETADO! Toca para el Nivel " + (currentLevel + 1);
-                paintText.setColor(Color.GREEN);
-                paintText.setTextSize(60);
-            }
+            message = "¡GANASTE EL NIVEL " + currentLevel + "! Toca para continuar.";
+            paintText.setColor(Color.GREEN);
             pauseSensors();
         } else if (gameState == GameState.LOST) {
-            message = "¡GAME OVER! Toca para reiniciar al Nivel 1";
+            message = "¡GAME OVER! Toca para reiniciar";
             paintText.setColor(Color.RED);
-            paintText.setTextSize(60);
         }
 
         if (message != null) {
@@ -357,6 +487,13 @@ public class GameView extends View implements SensorEventListener {
             if (gameState == GameState.WON || gameState == GameState.LOST) {
                 resetGame();
                 return true;
+            } else if (gameState == GameState.LEVEL_SELECT) {
+                for (int i = 0; i < levelButtons.length; i++) {
+                    if (levelButtons[i].contains(event.getX(), event.getY())) {
+                        loadLevel(i + 1);
+                        return true;
+                    }
+                }
             }
         }
         return super.onTouchEvent(event);
@@ -365,49 +502,48 @@ public class GameView extends View implements SensorEventListener {
 
     @Override
     public void onSensorChanged(SensorEvent event) {
-
-        // --- Sensor de Proximidad ---
-        if (event.sensor.getType() == Sensor.TYPE_PROXIMITY) {
-            if (event.values[0] < event.sensor.getMaximumRange()) {
-                if (gameState == GameState.RUNNING) {
+        if (gameState != GameState.RUNNING) {
+            if (event.sensor.getType() == Sensor.TYPE_PROXIMITY) {
+                if (event.values[0] < event.sensor.getMaximumRange() && gameState == GameState.RUNNING) {
                     gameState = GameState.PAUSED;
-                }
-            } else {
-                if (gameState == GameState.PAUSED) {
+                } else if (event.values[0] >= event.sensor.getMaximumRange() && gameState == GameState.PAUSED) {
                     gameState = GameState.RUNNING;
                 }
             }
-        }
-
-        // --- Sensor de Luz ---
-        if (event.sensor.getType() == Sensor.TYPE_LIGHT) {
-            float lightValue = event.values[0];
-            backgroundColor = (lightValue < 10) ? Color.DKGRAY : DEFAULT_BACKGROUND_COLOR;
-        }
-
-        if (gameState != GameState.RUNNING) {
             invalidate();
             return;
         }
 
-        // --- Lógica de Movimiento (Solo si RUNNING) ---
-        if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
+        if (walls.isEmpty()) {
+            return;
+        }
 
-            // COORDENADAS: Esta es la lógica que funciona en tu código original:
-            // X: Invertido (-event.values[0])
-            // Y: Normal (+event.values[1])
+        if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
             float xMovement = -event.values[0] * movementSpeed;
             float yMovement = event.values[1] * movementSpeed;
 
             float nextX = ballX + xMovement;
             float nextY = ballY + yMovement;
 
+            // *** Lógica de Cambio de Forma Constante (NIVEL 3) ***
+            if (currentLevel == 3) {
+                frameCount++;
+                if (frameCount % SHAPE_CHANGE_INTERVAL == 0) {
+                    // Alterna entre Círculo y Cuadrado
+                    if (playerShape == PlayerShape.CIRCLE) {
+                        playerShape = PlayerShape.SQUARE;
+                    } else {
+                        playerShape = PlayerShape.CIRCLE;
+                    }
+                }
+            }
+            // *******************************************************
+
             if (checkExitReached(nextX, nextY)) {
                 gameState = GameState.WON;
             }
-            // Verifica la colisión con paredes usando la posición con offset
             else if (checkWallCollision(nextX, nextY)) {
-                // Lógica de deslizamiento: mueve solo en el eje no bloqueado
+                // Colisión suave: permite deslizarse a lo largo de las paredes
                 if (!checkWallCollision(nextX, ballY)) {
                     ballX = nextX;
                 }
@@ -415,22 +551,32 @@ public class GameView extends View implements SensorEventListener {
                     ballY = nextY;
                 }
             } else {
-                // No hay colisión, mueve libremente
                 ballX = nextX;
                 ballY = nextY;
             }
 
-            // Mantenemos la bola dentro de los límites del laberinto (MAX_BOARD_X/Y)
-            if (ballX < radius) ballX = radius;
-            if (ballY < radius) ballY = radius;
+            // LÍMITES AJUSTADOS (choca con el borde del laberinto)
+            float mazeLeft = offsetX;
+            float mazeRight = offsetX + (DESIGN_WIDTH * scaleFactor);
+            float mazeTop = offsetY;
 
-            // CORRECCIÓN: Usamos MAX_BOARD_X/Y, no maxX/maxY
-            if (ballX > MAX_BOARD_X - radius) ballX = MAX_BOARD_X - radius;
-            if (ballY > MAX_BOARD_Y - radius) ballY = MAX_BOARD_Y - radius;
+            if (ballX < mazeLeft + radius) ballX = mazeLeft + radius;
+            if (ballX > mazeRight - radius) ballX = mazeRight - radius;
+            if (ballY < mazeTop + radius) ballY = mazeTop + radius;
+
         }
 
-        // ¡Se debe llamar a invalidate() al final del onSensorChanged para actualizar la vista!
-        invalidate();
+        if (event.sensor.getType() == Sensor.TYPE_LIGHT) {
+            float lightValue = event.values[0];
+            int defaultColor = (currentLevel == 1) ? Color.parseColor("#A0522D") :
+                    (currentLevel == 2) ? Color.parseColor("#4682B4") :
+                            Color.parseColor("#4B0082");
+            backgroundColor = (lightValue < 10) ? Color.DKGRAY : defaultColor;
+        }
+
+        if (gameState == GameState.RUNNING || gameState == GameState.PAUSED) {
+            invalidate();
+        }
     }
 
     @Override
